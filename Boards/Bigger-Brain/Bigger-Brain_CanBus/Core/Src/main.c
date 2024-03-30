@@ -162,6 +162,8 @@ int main(void)
 	buf_can1_tx[0] = 0x01;
 	buf_can1_tx[1] = ++tmp;
 
+	if (tmp == 0x2F) tmp = 0x00;
+
 	/* Start the Transmission process */
 	if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &can1_txHeader, buf_can1_tx) != HAL_OK)
 	{
