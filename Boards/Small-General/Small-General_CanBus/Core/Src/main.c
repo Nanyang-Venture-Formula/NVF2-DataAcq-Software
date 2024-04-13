@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
- ******************************************************************************
- * @file           : main.c
- * @brief          : Main program body
- ******************************************************************************
- * @attention
- *
- * Copyright (c) 2024 STMicroelectronics.
- * All rights reserved.
- *
- * This software is licensed under terms that can be found in the LICENSE file
- * in the root directory of this software component.
- * If no LICENSE file comes with this software, it is provided AS-IS.
- *
- ******************************************************************************
- */
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2024 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 
 #include "usbd_cdc_if.h"
+#include "stm32f0xx_hal_can.h"
+#include "stm32f0xx_it.h"
 
 /* USER CODE END Includes */
 
@@ -56,14 +58,13 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-CAN_TxHeaderTypeDef canTxHeader;
-CAN_RxHeaderTypeDef canRxHeader;
-uint32_t canTxMailBox;
+uint32_t can_id = 0x022;
 
-uint32_t rx_data[8];
-uint32_t tx_data[8];
+uint8_t tx_data[4] = {0x11, 0x22, 0x30, 0x40};
 
-CAN_FilterTypeDef canRxFilterConfig;
+uint8_t txData[8];
+uint8_t rxData[8];
+uint32_t txMailbox;
 
 /* USER CODE END PV */
 
@@ -83,12 +84,75 @@ static void MX_USART2_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+CAN_FilterTypeDef sFilterConfig;
+CAN_TxHeaderTypeDef txHeader;
+CAN_RxHeaderTypeDef rxHeader;
+
+
+/* Function to transmit a CAN message */
+void send_can_message(uint32_t id, uint8_t data_length, uint8_t* data) {
+
+  /* Check if data length is within valid range */
+  if (data_length > 8) {
+    Error_Handler(); // Handle invalid data length
+    return;
+  }
+
+  /* Configure CAN message header */
+  txHeader.IDE = CAN_ID_STD;
+  txHeader.StdId = id;
+  txHeader.RTR = CAN_RTR_DATA;
+  txHeader.DLC = data_length;
+
+  /* Copy data into transmit buffer */
+  uint8_t txData[data_length];
+  memcpy(txData, data, data_length);
+
+  /* Transmit the CAN message */
+  HAL_StatusTypeDef tx_status = HAL_CAN_AddTxMessage(&hcan, &txHeader, txData, &txMailbox);
+
+	if (tx_status != HAL_OK) {
+	switch (tx_status) {
+	case HAL_ERROR:
+	  // Generic hardware error
+		CDC_Transmit_FS("CAN: HAL Error\n", strlen("CAN: HAL Error\n"));
+	//	        	Error_Handler();
+	  break;
+	case HAL_BUSY:
+	  // CAN peripheral busy
+		CDC_Transmit_FS("CAN: Peripheral Busy\n", strlen("CAN: Peripheral Busy\n"));
+	//	        	Error_Handler();
+	  break;
+	case HAL_TIMEOUT:
+	  // CAN mailbox timeout
+		CDC_Transmit_FS("CAN: Mailbox Timeout\n", strlen("CAN: Mailbox Timeout\n"));
+	//	        	Error_Handler();
+	  break;
+	default:
+		CDC_Transmit_FS("CAN: Unknown Error\n", strlen("CAN: Unknown Error\n"));
+	//	        	Error_Handler();
+	}
+
+	char buf[32];
+	uint32_t err_code;
+	err_code = HAL_CAN_GetError(&hcan);
+	sprintf(buf, "error: %x \n", err_code);
+	CDC_Transmit_FS(buf, strlen(buf));
+
+	}
+
+	CDC_Transmit_FS("sending msg\n", strlen("sending msg\n"));
+
+}
+
+
+
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -122,41 +186,60 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  canTxHeader.DLC = 1;
-  canTxHeader.IDE = CAN_ID_STD;
-  canTxHeader.RTR = CAN_RTR_DATA;
-  canTxHeader.StdId = 0x244;
+  sFilterConfig.FilterActivation = ENABLE;
+  sFilterConfig.FilterBank = 0; // Filter bank 0 for standard IDs
+  sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK; // Set filter mode to mask
+  sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT; // Use 32-bit filter for standard IDs
+  sFilterConfig.FilterIdHigh = 0; // Set all bits to zero for mask
+  sFilterConfig.FilterIdLow = 0; // Set all bits to zero for mask
+  sFilterConfig.FilterMaskIdHigh = 0xFFFFFFFF; // Set all bits to one for mask
+  sFilterConfig.FilterMaskIdLow = 0xFFFFFFFF; // Set all bits to one for mask
+  sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0; // Assign messages to FIFO0
 
-  canRxFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0; // set fifo assignment
-  canRxFilterConfig.FilterIdHigh = 0x245 << 5;               // the ID that the filter looks for (switch this for the other microcontroller)
-  canRxFilterConfig.FilterIdLow = 0;
-  canRxFilterConfig.FilterMaskIdHigh = 0;
-  canRxFilterConfig.FilterMaskIdLow = 0;
-  canRxFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT; // set filter scale
-  canRxFilterConfig.FilterActivation = ENABLE;
+  HAL_CAN_ConfigFilter(&hcan, &sFilterConfig);
 
-  HAL_CAN_ConfigFilter(&hcan, &canRxFilterConfig);
+	if (HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+	{
+		Error_Handler();
+	}
 
-  HAL_CAN_Start(&hcan);
-  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+	if(HAL_CAN_Start(&hcan) != HAL_OK)
+	{
+		Error_Handler();
+	}
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+	uint8_t fifo_level = 0;
+	char dbg_buf[64];
+
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  CDC_Transmit_FS(".\n", strlen(".\n"));
+
+	  if ((tx_data[0]++) > 0xFA) tx_data[0] = 0x01;
+	  send_can_message(can_id, sizeof(tx_data), tx_data);
+
+
+	  fifo_level = HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0);
+	  sprintf(dbg_buf, "fifo0: %d \n", fifo_level);
+	  CDC_Transmit_FS(dbg_buf, strlen(dbg_buf));
+
+	  HAL_Delay(500);
   }
   /* USER CODE END 3 */
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -164,9 +247,10 @@ void SystemClock_Config(void)
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
-   * in the RCC_OscInitTypeDef structure.
-   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI | RCC_OSCILLATORTYPE_HSI14 | RCC_OSCILLATORTYPE_HSI48;
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSI14
+                              |RCC_OSCILLATORTYPE_HSI48;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.HSI14State = RCC_HSI14_ON;
@@ -179,8 +263,9 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-   */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1;
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI48;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
@@ -189,7 +274,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB | RCC_PERIPHCLK_USART1 | RCC_PERIPHCLK_USART2 | RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB|RCC_PERIPHCLK_USART1
+                              |RCC_PERIPHCLK_USART2|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
   PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
@@ -202,10 +288,10 @@ void SystemClock_Config(void)
 }
 
 /**
- * @brief ADC Initialization Function
- * @param None
- * @retval None
- */
+  * @brief ADC Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_ADC_Init(void)
 {
 
@@ -220,7 +306,7 @@ static void MX_ADC_Init(void)
   /* USER CODE END ADC_Init 1 */
 
   /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-   */
+  */
   hadc.Instance = ADC1;
   hadc.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
   hadc.Init.Resolution = ADC_RESOLUTION_12B;
@@ -241,7 +327,7 @@ static void MX_ADC_Init(void)
   }
 
   /** Configure for the selected ADC regular channel to be converted.
-   */
+  */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_RANK_CHANNEL_NUMBER;
   sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
@@ -251,7 +337,7 @@ static void MX_ADC_Init(void)
   }
 
   /** Configure for the selected ADC regular channel to be converted.
-   */
+  */
   sConfig.Channel = ADC_CHANNEL_1;
   if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
   {
@@ -259,7 +345,7 @@ static void MX_ADC_Init(void)
   }
 
   /** Configure for the selected ADC regular channel to be converted.
-   */
+  */
   sConfig.Channel = ADC_CHANNEL_9;
   if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
   {
@@ -267,7 +353,7 @@ static void MX_ADC_Init(void)
   }
 
   /** Configure for the selected ADC regular channel to be converted.
-   */
+  */
   sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
   if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
   {
@@ -276,13 +362,14 @@ static void MX_ADC_Init(void)
   /* USER CODE BEGIN ADC_Init 2 */
 
   /* USER CODE END ADC_Init 2 */
+
 }
 
 /**
- * @brief CAN Initialization Function
- * @param None
- * @retval None
- */
+  * @brief CAN Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_CAN_Init(void)
 {
 
@@ -297,8 +384,8 @@ static void MX_CAN_Init(void)
   hcan.Init.Prescaler = 16;
   hcan.Init.Mode = CAN_MODE_NORMAL;
   hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_3TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_2TQ;
   hcan.Init.TimeTriggeredMode = DISABLE;
   hcan.Init.AutoBusOff = DISABLE;
   hcan.Init.AutoWakeUp = DISABLE;
@@ -312,13 +399,14 @@ static void MX_CAN_Init(void)
   /* USER CODE BEGIN CAN_Init 2 */
 
   /* USER CODE END CAN_Init 2 */
+
 }
 
 /**
- * @brief I2C1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_I2C1_Init(void)
 {
 
@@ -344,14 +432,14 @@ static void MX_I2C1_Init(void)
   }
 
   /** Configure Analogue filter
-   */
+  */
   if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Configure Digital filter
-   */
+  */
   if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
   {
     Error_Handler();
@@ -359,13 +447,14 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
- * @brief SPI1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_SPI1_Init(void)
 {
 
@@ -398,13 +487,14 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
 }
 
 /**
- * @brief USART1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART1_UART_Init(void)
 {
 
@@ -432,13 +522,14 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* USER CODE END USART1_Init 2 */
+
 }
 
 /**
- * @brief USART2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART2_UART_Init(void)
 {
 
@@ -466,18 +557,19 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
 }
 
 /**
- * @brief GPIO Initialization Function
- * @param None
- * @retval None
- */
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-  /* USER CODE END MX_GPIO_Init_1 */
+/* USER CODE BEGIN MX_GPIO_Init_1 */
+/* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -487,7 +579,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(SPI_CS_GPIO_Port, SPI_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, USR_LED_Pin | R8_Pin | R7_Pin | R6_Pin | R5_Pin | R4_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, USR_LED_Pin|R8_Pin|R7_Pin|R6_Pin
+                          |R5_Pin|R4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(R3_GPIO_Port, R3_Pin, GPIO_PIN_RESET);
@@ -520,7 +613,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : R8_Pin R7_Pin R6_Pin R5_Pin
                            R4_Pin */
-  GPIO_InitStruct.Pin = R8_Pin | R7_Pin | R6_Pin | R5_Pin | R4_Pin;
+  GPIO_InitStruct.Pin = R8_Pin|R7_Pin|R6_Pin|R5_Pin
+                          |R4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -533,8 +627,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(R3_GPIO_Port, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-  /* USER CODE END MX_GPIO_Init_2 */
+/* USER CODE BEGIN MX_GPIO_Init_2 */
+/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -542,9 +636,9 @@ static void MX_GPIO_Init(void)
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -552,18 +646,20 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+	  CDC_Transmit_FS("err\n", strlen("err\n"));
+	  HAL_Delay(1000);
   }
   /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef USE_FULL_ASSERT
+#ifdef  USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

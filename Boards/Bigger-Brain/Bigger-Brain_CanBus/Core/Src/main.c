@@ -64,16 +64,24 @@ UART_HandleTypeDef huart10;
 
 /* USER CODE BEGIN PV */
 
-FDCAN_RxHeaderTypeDef can1_rxHeader; //CAN Bus Transmit Header
-FDCAN_TxHeaderTypeDef can1_txHeader; //CAN Bus Receive Header
-uint8_t buf_can1_rx[8];  //CAN Bus Receive Buffer
-uint8_t buf_can1_tx[8];  //CAN Bus Receive Buffer
+FDCAN_TxHeaderTypeDef TxHeader;
+FDCAN_RxHeaderTypeDef RxHeader;
+uint8_t TxData[] = {0xFF, 0xFE, 0xFF, 0xFE, 0xFF, 0xFE, 0xFF, 0xFE};
+uint8_t RxData[16];
+volatile uint32_t Instance = 0;
 
+//FDCAN_RxHeaderTypeDef can1_rxHeader; //CAN Bus Transmit Header
+//FDCAN_TxHeaderTypeDef can1_txHeader; //CAN Bus Receive Header
+//uint8_t buf_can1_rx[8];  //CAN Bus Receive Buffer
+//uint8_t buf_can1_tx[8];  //CAN Bus Receive Buffer
+//
+//
+//FDCAN_RxHeaderTypeDef can2_rxHeader; //CAN Bus Transmit Header
+//FDCAN_TxHeaderTypeDef can2_txHeader; //CAN Bus Receive Header
+//uint8_t buf_can2_rx[8];  //CAN Bus Receive Buffer
+//uint8_t buf_can2_tx[8];  //CAN Bus Receive Buffer
 
-FDCAN_RxHeaderTypeDef can2_rxHeader; //CAN Bus Transmit Header
-FDCAN_TxHeaderTypeDef can2_txHeader; //CAN Bus Receive Header
-uint8_t buf_can2_rx[8];  //CAN Bus Receive Buffer
-uint8_t buf_can2_tx[8];  //CAN Bus Receive Buffer
+FDCAN_FilterTypeDef sFilterConfig;
 
 /* USER CODE END PV */
 
@@ -148,7 +156,83 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  uint8_t tmp = 0;
+  sFilterConfig.IdType = FDCAN_STANDARD_ID;
+  sFilterConfig.FilterType = FDCAN_FILTER_RANGE;
+  sFilterConfig.FilterID1 = 0x000;
+  sFilterConfig.FilterID2 = 0xFFF;
+  sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  sFilterConfig.FilterIndex = 0;
+
+  if (HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ConfigFilter(&hfdcan2, &sFilterConfig) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ConfigFilter(&hfdcan3, &sFilterConfig) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO1, FDCAN_ACCEPT_IN_RX_FIFO1, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_ACCEPT_IN_RX_FIFO1, FDCAN_ACCEPT_IN_RX_FIFO1, FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ConfigGlobalFilter(&hfdcan3, FDCAN_ACCEPT_IN_RX_FIFO1, FDCAN_ACCEPT_IN_RX_FIFO1, FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_Start(&hfdcan2) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  if (HAL_FDCAN_Start(&hfdcan3) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+
+  /* Prepare Tx Header */
+    TxHeader.Identifier = 0x321;
+    TxHeader.IdType = FDCAN_STANDARD_ID;
+    TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+    TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+    TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+    TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+    TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+    TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+    TxHeader.MessageMarker = 0;
 
   /* USER CODE END 2 */
 
@@ -159,17 +243,41 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	buf_can1_tx[0] = 0x01;
-	buf_can1_tx[1] = ++tmp;
-
-	if (tmp == 0x2F) tmp = 0x00;
 
 	/* Start the Transmission process */
-	if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &can1_txHeader, buf_can1_tx) != HAL_OK)
+//	  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)
+//	  {
+//		/* Transmission request Error */
+//		Error_Handler();
+//	  }
+//	  HAL_Delay(10);
+
+	  /* Check which FDCAN instance has received messages */
+	if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) >= 1)
 	{
-	  /* Transmission request Error */
-	  Error_Handler();
+		/* Retrieve Rx message from RX FIFO0 */
+		if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+		{
+		  Error_Handler();
+		}
+
+		CDC_Transmit_HS("got a message 0\n", strlen("got a message 0\n"));
+
 	}
+
+	if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO1) >= 1)
+	{
+		/* Retrieve Rx message from RX FIFO0 */
+		if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO1, &RxHeader, RxData) != HAL_OK)
+		{
+		  Error_Handler();
+		}
+
+		CDC_Transmit_HS("got a message 1\n", strlen("got a message 1\n"));
+
+	}
+
+	CDC_Transmit_HS(".\n", strlen(".\n"));
 	HAL_Delay(250);
 
   }
@@ -395,8 +503,8 @@ static void MX_FDCAN2_Init(void)
   /* USER CODE END FDCAN2_Init 1 */
   hfdcan2.Instance = FDCAN2;
   hfdcan2.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan2.Init.Mode = FDCAN_MODE_INTERNAL_LOOPBACK;
-  hfdcan2.Init.AutoRetransmission = ENABLE;
+  hfdcan2.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan2.Init.AutoRetransmission = DISABLE;
   hfdcan2.Init.TransmitPause = DISABLE;
   hfdcan2.Init.ProtocolException = DISABLE;
   hfdcan2.Init.NominalPrescaler = 5;
@@ -452,7 +560,7 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.AutoRetransmission = DISABLE;
   hfdcan3.Init.TransmitPause = DISABLE;
   hfdcan3.Init.ProtocolException = DISABLE;
-  hfdcan3.Init.NominalPrescaler = 16;
+  hfdcan3.Init.NominalPrescaler = 10;
   hfdcan3.Init.NominalSyncJumpWidth = 1;
   hfdcan3.Init.NominalTimeSeg1 = 2;
   hfdcan3.Init.NominalTimeSeg2 = 2;
@@ -926,6 +1034,56 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+
+/**
+  * @brief  Rx FIFO 0 callback.
+  * @param  hfdcan pointer to an FDCAN_HandleTypeDef structure that contains
+  *         the configuration information for the specified FDCAN.
+  * @param  RxFifo0ITs indicates which Rx FIFO 0 interrupts are signaled.
+  *         This parameter can be any combination of @arg FDCAN_Rx_Fifo0_Interrupts.
+  * @retval None
+  */
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+
+	char print_buf[128];
+	FDCAN_RxHeaderTypeDef rxHeader;
+	uint8_t rxData[64];
+
+	uint8_t FDCAN_INST = 0xFF;
+	bool rxHasError = 1;
+
+  if( (RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0)
+  {
+    /* Retrieve Rx messages from RX FIFO0 */
+    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rxHeader, rxData) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    if (hfdcan->Instance == FDCAN1)
+    {
+    	FDCAN_INST = 0x01;
+    }
+    else if (hfdcan->Instance == FDCAN1)
+    {
+    	FDCAN_INST = 0x02;
+    }
+    else if (hfdcan->Instance == FDCAN1)
+    {
+    	FDCAN_INST = 0x03;
+    }
+
+    rxHasError = (rxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE);
+
+    sprintf(print_buf, "%zu, %x, %d, %x, %zu \n", rxHeader.RxTimestamp, FDCAN_INST, rxHasError, rxHeader.Identifier, rxHeader.DataLength);
+    CDC_Transmit_HS((uint8_t*) print_buf, strlen(print_buf));
+  }
+
+  CDC_Transmit_HS("f\n",strlen("f\n"));
+}
+
+
 /* USER CODE END 4 */
 
 /**
@@ -937,8 +1095,16 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+
+//  const char buf[24] = "Error Occurred...\n";
   while (1)
   {
+	  for (int i = 50; i < 500; i += 50)
+	  {
+		  HAL_Delay(i);
+		  HAL_GPIO_TogglePin(USR_LED_GPIO_Port, USR_LED_Pin);
+	  }
+	  CDC_Transmit_HS("Error Occurred...\n", strlen("Error Occurred...\n"));
   }
   /* USER CODE END Error_Handler_Debug */
 }

@@ -32,6 +32,10 @@ extern "C" {
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <stdbool.h>
+
+#include "NVF_CanBus_Conf.h"
+
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
